@@ -4,10 +4,10 @@ import bcrypt from "bcrypt";
 
 export const register = async (req, res) => {
   try {
-    
-
     const password = req.body.password;
+    
     const salt = await bcrypt.genSalt();
+
     const hash = await bcrypt.hash(password, salt);
 
     const doc = new UserModel({
