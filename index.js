@@ -1,10 +1,13 @@
 import express from "express";
-import jwt from "jsonwebtoken";
-import bcrypt from "bcrypt";
 import mongoose from "mongoose";
-import { validationResult } from "express-validator";
-import { registerValidation } from "./validations/auth.js";
-import UserModel from "./models/User.js";
+import multer from "multer";
+import { handleValidationErrors, checkAuth } from "./utils/index.js";
+import {
+  registerValidation,
+  loginValidation,
+  postCreateValidation,
+} from "./validations/validations.js";
+import { UserControler, PostControler } from "./controlers/index.js";
 
 mongoose
   .connect(
@@ -16,97 +19,62 @@ mongoose
   .catch((err) => console.log("Db error", err));
 
 const app = express();
+
+const storage = multer.diskStorage({
+  destination: (_, __, cb) => {
+    cb(null, "uploads");
+  },
+  filename: (_, file, cb) => {
+    cb(null, file.originalname);
+  },
+});
+
+const upload = multer({ storage });
+
 app.use(express.json());
+app.use("/uploads", express.static("uploads"));
 
-app.get('/', (req,res) => {
-    res.send('hello')
-})
-
-app.post("/auth/login", async (req, res) => {
-  try {
-    const user = await UserModel.findOne({ email: req.body.email });
-    if (!user) {
-      return req.status(404).json({
-        message: "користувач не найдений",
-      });
-    }
-
-    const isValidPass = await bcrypt.compare(
-      req.body.password,
-      user.toObject().passwordHash
-    );
-    if (!isValidPass) {
-      return res.status(400).json({
-        message: "неправильний логін або пароль",
-      });
-    }
-
-    const token = jwt.sign(
-      {
-        _id: user._id,
-      },
-      "secret123",
-      {
-        expiresIn: "30d",
-      }
-    );
-
-    const { passwordHash, ...userData } = user.toObject();
-
-    res.json({
-      ...userData,
-      token,
-    });
-  } catch (error) {
-    console.log(error);
-    res.status(500).json({
-      message: "не вдалось зареєструватись",
-    });
-  }
+app.get("/", (req, res) => {
+  res.send("hello");
 });
 
-app.post("/auth/register", registerValidation, async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json(errors.array());
-    }
+app.post(
+  "/auth/login",
+  loginValidation,
+  handleValidationErrors,
+  UserControler.login
+);
+app.get("/auth/me", checkAuth, UserControler.getMe);
+app.post(
+  "/auth/register",
+  registerValidation,
+  handleValidationErrors,
+  UserControler.register
+);
 
-    const password = req.body.password;
-    const salt = await bcrypt.genSalt();
-    const hash = await bcrypt.hash(password, salt);
-
-    const doc = new UserModel({
-      email: req.body.email,
-      fullName: req.body.fullName,
-      avatarUrl: req.body.avatarUrl,
-      passwordHash: hash,
-    });
-
-    const user = await doc.save();
-    const token = jwt.sign(
-      {
-        _id: user._id,
-      },
-      "secret123",
-      {
-        expiresIn: "30d",
-      }
-    );
-
-    const { passwordHash, ...userData } = user.toObject();
-
-    res.json({
-      ...userData,
-      token,
-    });
-  } catch (error) {
-    console.log(err);
-    res.status(500).json({
-      message: "не вдалось зареєструватись",
-    });
-  }
+app.post("/upload", checkAuth, upload.single("image"), (req, res) => {
+  res.json({
+    url: `/uploads/${req.file.originalname}`,
+  });
 });
+
+app.get("/posts", PostControler.getAll);
+app.get("/posts/:id", PostControler.getOne);
+app.post(
+  "/posts",
+  checkAuth,
+  postCreateValidation,
+  handleValidationErrors,
+  PostControler.create
+);
+app.delete("/posts/:id", checkAuth, PostControler.remove);
+app.patch(
+  "/posts/:id",
+  checkAuth,
+  postCreateValidation,
+  handleValidationErrors,
+  PostControler.update
+);
 
 app.listen(4444, (err) => {
   if (err) {
